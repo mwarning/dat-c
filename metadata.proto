@@ -1,0 +1,65 @@
+
+syntax = "proto2";
+
+message Header {
+  required string type = 1;
+  optional bytes content = 2;
+/*
+root:
+    1 <chunk> = "hyperdrive"
+    2 <chunk> = bytes (32)
+        0000   CE F0 96 9F 67 DB 0E 97 3F 70 90 56 97 87 53 B8 83 E7 6D 9D 33 89 77 F0  ....g...?p.V..S...m.3.w.
+        0018   45 39 DF 57 D3 78 E4 D7                                                  E9.W.x..
+    1 <chunk> = "/cat.png"
+    2 <chunk> = message:
+        1 <varint> = 33188
+        2 <varint> = 0
+        3 <varint> = 0
+        4 <varint> = 2747904
+        5 <varint> = 42
+        6 <varint> = 0
+        7 <varint> = 0
+        8 <varint> = 1515863450935
+        9 <varint> = 1515863450935
+    3 <chunk> = bytes (3)
+        0000   01 00 00                                                                 ...
+    1 <chunk> = "/welcome.txt"
+    2 <chunk> = message:
+        1 <varint> = 33188
+        2 <varint> = 0
+        3 <varint> = 0
+        4 <varint> = 317
+        5 <varint> = 1
+        6 <varint> = 42
+        7 <varint> = 2747904
+        8 <varint> = 1515863450953
+        9 <varint> = 1515863450953
+    3 <chunk> = bytes (4)
+        0000   01 01 01 00
+  */
+}
+
+message Node {
+  required string path = 1;
+  optional Stat value = 2;
+  optional bytes trie = 3;
+  //repeated Writer writers = 4;
+  //optional uint64 writersSequence = 5;
+}
+
+message Writer {
+  required bytes publicKey = 1;
+  optional string permission = 2;
+}
+
+message Stat {
+  required uint32 mode = 1;
+  optional uint32 uid = 2;
+  optional uint32 gid = 3;
+  optional uint64 size = 4;
+  optional uint64 blocks = 5;
+  optional uint64 offset = 6;
+  optional uint64 byteOffset = 7;
+  optional uint64 mtime = 8;
+  optional uint64 ctime = 9;
+}
