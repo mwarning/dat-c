@@ -1,12 +1,11 @@
 # dat-c
 
 A hobby implementation of the [dat protocol](https://github.com/datproject).
+State: More or less a collection of code snippets.
 
 Related Projects and Documentation:
 - [dat protocol whitepaper](https://github.com/datprotocol/whitepaper)
 - [Rust](https://www.rust-lang.org) implementation: [geniza](https://github.com/bnewbold/geniza)
-
-It still consists of code snippets. The parts have not been connected to make working implementation.
 
 Dependencies:
 - libsodium
