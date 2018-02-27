@@ -37,6 +37,9 @@
 #include "dht_wrapper.h"
 
 
+#define DEBUGIO 1
+
+
 #define ARRAY_SIZE(x)	(sizeof(x) / sizeof(x[0]))
 #define FIELD_SIZEOF(t, f) (sizeof(((t*)0)->f))
 #define SERVER_PORT	12345
@@ -73,14 +76,29 @@ enum ConnectionType {
 	INCOMING_CONNECTION
 };
 
+
+INCOMING:
 enum State
 {
-	uint8_t feed_done;
-	uint8_t handshake_done;
-	uint8_t info_done;
-	uint8_t have;
-	uint8_t want;
-	enum SessionState s;
+	RECEIVE_FEED
+	SEND_FEED
+	RECEIVE_HANDSHAKE
+	SEND_HANDSHAKE
+	RECEIVE_HAVE
+	SEND_INFO
+	//SEND_WANT
+};
+
+OUTGOING:
+enum State
+{
+	SEND_FEED
+	RECEIVE_FEED
+	SEND_HANDSHAKE
+	RECEIVE_HANDSHAKE
+	SEND_INFO
+	RECEIVE_HAVE
+	//SEND_WANT
 };
 
 //we initiate connection
@@ -201,7 +219,13 @@ static struct Session *addSession(const struct sockaddr_storage *addr, int clien
 	session->clientsock = clientsock;
 
 	// Setup out_state for crypto (int_state init requires in_nonce to be received)
-	crypto_stream_xor_init(&session->out_state, &session->out_nonce[0], &g_content.pkey[0]);
+
+	printf("crypto out pkey:\n");
+	printHexDump(&g_metadata.pkey[0], 32);
+	printf("crypto out nonce:\n");
+	printHexDump(&session->out_nonce[0], 32);
+
+	crypto_stream_xor_init(&session->out_state, &session->out_nonce[0], &g_metadata.pkey[0]);
 
 	if (g_sessions) {
 		g_sessions->next = session;
@@ -239,18 +263,29 @@ int send_msg(struct Session *session, int type, int channel, uint8_t data[], siz
 		return EXIT_FAILURE;
 	}
 
+#if DEBUGIO
+	printf("send:\n");
+	printHexDump(&data[packet_offset], packet_size);
+#endif
+
 	if (!session->out_nonce_send) {
 		memcpy(cbuf, &data[packet_offset], packet_size);
 	} else {
 		crypto_stream_xor_update(&session->out_state, cbuf, &data[packet_offset], packet_size);
 	}
 
+#if DEBUGIO
+	printf("send raw:\n");
+	printHexDump(cbuf, packet_size);
+#endif
+
 	rc = send(session->clientsock, cbuf, packet_size, 0);
-	
+
 	if (rc != packet_size) {
 		printf("send(): %s\n", strerror(errno));
 		return EXIT_FAILURE;
 	} else {
+		// Assume first packet sends nonce
 		if (!session->out_nonce_send) {
 			// From now on all send messages over this connection are encrypted
 			session->out_nonce_send = 1;
@@ -289,10 +324,6 @@ int send_handshake(struct Session *session)
 	printf("Send HANDSHAKE\n");
 	// Send Handshake
 	Handshake handshake = HANDSHAKE__INIT;
-
-	if (handshake.has_id) {
-		printHexDump(handshake.id.data, handshake.id.len);
-	}
 
 	// just to identify if we connect to ourselves
 	bytes_random(&id[0], 32);
@@ -394,7 +425,7 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 
 	// Enough data
 	if (msgsize > size) {
-		printHexDump(src, size);
+		//printHexDump(src, size);
 		printf("More data needed!! (%llu)\n", msgsize);
 		return 0;
 	}
@@ -414,9 +445,10 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 	const size_t pbsize = msgsize - header_len;
 
 	//printf("parse_message: type: %d, channel: %d, pbsize: %llu, header_len: %llu, msgsize_len: %llu, msgsize: %llu\n", type, channel, pbsize, header_len, msgsize_len, msgsize);
-
-	//printf("received:\n");
-	//printHexDump(src, size);
+#if DEBUGIO
+	printf("received:\n");
+	printHexDump(src, size);
+#endif
 
 	switch (type) {
 	case TYPE_FEED:
@@ -432,17 +464,15 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 			return -1;
 		}
 
-		printf("got discoveryKey:\n");
-		printHexDump(feed->discoverykey.data, 32);
+		//printf("got discoveryKey:\n");
+		//printHexDump(feed->discoverykey.data, 32);
 
 		if (0 == memcmp(&g_metadata.discovery_key[0], feed->discoverykey.data, 32)) {
-			session->reg = &g_metadata;
-			//memcpy(session->pkey, g_metadata.pkey, 32);
-			//memcpy(session->discoverykey, g_metadata.discovery_key, 32);
+			if (!session->reg)
+				session->reg = &g_metadata;
 		} else if (0 == memcmp(&g_content.discovery_key[0], feed->discoverykey.data, 32)) {
-			session->reg = &g_content;
-			//memcpy(session->pkey, g_content.pkey, 32);
-			//memcpy(session->discoverykey, g_content.discovery_key, 32);
+			if (!session->reg)
+				session->reg = &g_content;
 		} else {
 			printf("Peer asked for unknown discoverykey\n");
 			return -1;
@@ -665,70 +695,63 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 
 int handle_connection3(struct Session *session, uint8_t *data, size_t size)
 {
-	//printf("handle_connection3: size: %llu\n", size);
+#if DEBUGIO
+	printf("received raw:\n");
+	printHexDump(data, size);
+#endif
+
+	if (size > (FIELD_SIZEOF(struct Session, buffer) - session->buffer_len)) {
+		printf("Buffer full\n");
+		return -1;
+	}
+
+	if (session->in_nonce_received) {
+		//printf("crypto_stream_xor_update %llu, to_copy: %llu\n", session->buffer_len, to_copy);
+		int rc = crypto_stream_xor_update(&session->in_state, &session->buffer[session->buffer_len], data, size);
+		if (rc) return -1;
+	} else {
+		// Append data
+		memcpy(&session->buffer[session->buffer_len], data, size);
+	}
+
+	session->buffer_len += size;
 
 	while (1) {
-		const size_t to_copy = MIN(size, FIELD_SIZEOF(struct Session, buffer) - session->buffer_len);
-		if (to_copy == 0) {
-			break;
-		}
-
-		// Fill buffer up to as much as possible
-		if (session->in_nonce_received == 0) {
-			memcpy(&session->buffer[session->buffer_len], data, to_copy);
-		} else {
-			//printf("crypto_stream_xor_update %llu, to_copy: %llu\n", session->buffer_len, to_copy);
-			int rc = crypto_stream_xor_update(&session->in_state, &session->buffer[session->buffer_len], data, to_copy);
-			if (rc) return -1;
-		}
-
-		session->buffer_len += to_copy;
-		data += to_copy;
-		size -= to_copy;
-
-		// consume as much as possible from buffer
-		int consumed = 0;
-		while (1) {
-			int was_initialized = session->in_nonce_received;
-			int avail = session->buffer_len - consumed;
-			int parsed = parse_message(session, &session->buffer[consumed], avail);
-
-			if (parsed < 0) {
-				printf("parsing error => close connection\n");
-				return -1;
-			}
-
-			if (parsed == 0) {
-				// need more data
-				break;
-			}
-
-			consumed += MIN(parsed, avail); //MIN not necessary if parsed <= avail
-
-			// we just received a feed/nonce => decrypt data after messages
-			if ( 0 == was_initialized && was_initialized != session->in_nonce_received) {
-				// Decode remaining data
-				size_t rest = session->buffer_len - consumed;
-				printf("decrypt %llu bytes we already received\n", rest);
-				uint8_t tmp[FIELD_SIZEOF(struct Session, buffer)];
-
-				// TODO: use g_metadata.pkey or g_content.pkey!!
-				crypto_stream_xor_init(&session->in_state, &session->in_nonce[0], &session->reg->pkey[0]); //&session->pkey[0]);
-				int rc = crypto_stream_xor_update(&session->in_state, tmp, &session->buffer[consumed], rest);
-				if (rc) return -1;
-				memcpy(&session->buffer[consumed], tmp, rest);
-			}
-		}
-
-		if (consumed == 0 && session->buffer_len == FIELD_SIZEOF(struct Session, buffer)) {
-			printf("Cannot consume message, buffer size to small.\n");
-			//close connection...
+		int prev_in_nonce_received = session->in_nonce_received;
+		int consumed = parse_message(session, &session->buffer[0], session->buffer_len);
+		if (consumed < 0) {
+			printf("parsing error => close connection\n");
 			return -1;
 		}
 
-		//move left over data to front of buffer
-		memmove(&session->buffer[0], &session->buffer[consumed], session->buffer_len - consumed);
-		session->buffer_len -= consumed;
+		if (consumed == 0) {
+			// need more data or no dat left
+			break;
+		}
+
+		// Remove consumed data from buffer
+		size_t newlen = session->buffer_len - consumed;
+		memmove(&session->buffer[0], &session->buffer[consumed], newlen);
+		session->buffer_len = newlen;
+
+		// Switch to encryption
+		if (0 == prev_in_nonce_received && session->in_nonce_received && newlen) {
+			printf("switch to encrypt:\n");
+			printHexDump(&session->buffer[0], newlen);
+
+			uint8_t tmp[FIELD_SIZEOF(struct Session, buffer)];
+			printf("crypto in pkey:\n");
+			printHexDump(&session->reg->pkey[0], 32);
+			printf("crypto in nonce:\n");
+			printHexDump(&session->in_nonce[0], 32);
+
+			crypto_stream_xor_init(&session->in_state, &session->in_nonce[0], &session->reg->pkey[0]);
+			crypto_stream_xor_update(&session->in_state, &tmp[0], &session->buffer[0], newlen);
+			memcpy(&session->buffer[0], tmp, newlen);
+
+			printf("encrypted:\n");
+			printHexDump(&session->buffer[0], newlen);
+		}
 	}
 
 	return 0;
@@ -866,9 +889,9 @@ static void dat_client_handler(int revents, int clientsock)
 	if (!session->out_nonce_send) {
 		send_feed(session);
 		send_handshake(session);
-		send_info(session);
-		send_have(session);
-		send_want(session);
+		//send_info(session);
+		//send_have(session);
+		//send_want(session);
 	}
 
 	return;
