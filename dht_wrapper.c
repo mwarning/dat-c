@@ -50,6 +50,7 @@ void dht_hash( void *hash_return, int hash_size,
 // Needed for dht.c
 int dht_random_bytes(void *buf, size_t size) {
   randombytes_buf(buf, size);
+  return 0;
 }
 
 
@@ -135,6 +136,7 @@ void dht_handle(int revents, int fd) {
 
   if( buflen > 0 ) {
     // Handle incoming data
+    fromlen = sizeof(from);
     rc = dht_periodic( buf, buflen, (struct sockaddr*) &from, fromlen, &time_wait, dht_callback_func, NULL );
 
     if( rc < 0 && errno != EINTR ) {

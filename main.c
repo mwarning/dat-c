@@ -26,6 +26,7 @@
 #include <stdlib.h>
 /* For the final part of the example. */
 #include <ctype.h>
+#include <inttypes.h>
 
 #include "metadata.pb-c.h"
 #include "utils.h"
@@ -154,7 +155,7 @@ void printHash(const uint8_t *hash) {
 void printHashBuf(uint8_t *buf, const uint8_t *hash) {
   int i;
   for(i = 0; i < 32; i++) {
-    sprintf(buf + 2 * i, "%02x", hash[i]);
+    sprintf(((char*) buf) + 2 * i, "%02x", hash[i]);
   }
 }
 
@@ -175,7 +176,7 @@ void printBits(size_t const size, void const * const ptr) {
 void printNode(const struct Node *e) {
   printf("Node: ");
   printHash(e->hash);
-  printf(" %llu\n", be64toh(e->size));
+  printf(" %"PRIu64"\n", be64toh(e->size));
 }
 
 void printNodes(const struct Node *nodes, uint32_t count) {
@@ -353,7 +354,7 @@ int read_metadata(const char *meta_path, const char *tree_path) {
 
   printf("unpack header:\n");
   size_t header_size = getChildSize(&tree, 0);
-  header = header__unpack(NULL, header_size, file.mem);
+  header = header__unpack(NULL, header_size, (uint8_t*) file.mem);
   if (header == NULL) {
     fprintf(stderr, "error unpacking header message\n");
     exit(1);
@@ -361,7 +362,7 @@ int read_metadata(const char *meta_path, const char *tree_path) {
 
   printf("type: %s\n", header->type);
   if (header->has_content) {
-    printf("content.len: %llu\n", header->content.len);
+    printf("content.len: %lu\n", header->content.len);
     //printf("data: %llu\n", header->content.data);
   }
 
@@ -374,7 +375,7 @@ printf("unpack node:\n");
   size_t offset = header_size;
   for (size_t index = 2; index < nodes_count; index += 2) {
     size_t node_size = getChildSize(&tree, index);
-    node = node__unpack(NULL, node_size, file.mem + offset);
+    node = node__unpack(NULL, node_size, ((uint8_t*) file.mem) + offset);
     offset += node_size;
 
     if (node == NULL) {
@@ -386,23 +387,23 @@ printf("unpack node:\n");
     printf("  path: %s\n", node->path);
 
     Stat *stat = node->value;
-    printf("  mode: %lu\n", stat->mode);
+    printf("  mode: %"PRIu32"\n", stat->mode);
     if (stat->has_uid) {
-      printf("  uid: %lu\n", stat->uid);
+      printf("  uid: %"PRIu32"\n", stat->uid);
     }
     if (stat->has_gid) {
-      printf("  gid: %lu\n", stat->gid);
+      printf("  gid: %"PRIu32"\n", stat->gid);
     }
     if (stat->has_size) {
-      printf("  size: %llu\n", stat->size);
+      printf("  size: %"PRIu64"\n", stat->size);
     }
     if (stat->has_blocks) {
-      printf("  blocks: %llu\n", stat->blocks);
+      printf("  blocks: %"PRIu64"\n", stat->blocks);
     }
     //...
 
     if (node->has_trie) {
-      printf("  trie len: %llu\n", node->trie.len);
+      printf("  trie len: %lu\n", node->trie.len);
     }
 
     node__free_unpacked(node, NULL);
@@ -553,7 +554,7 @@ int printFile(const char path[]) {
     return 1;
   }
 
-  printf("%s (%llu):\n", path, file.size);
+  printf("%s (%lu):\n", path, file.size);
   printHexDump(file.mem, file.size);
 
   closeFile(&file);
@@ -574,7 +575,7 @@ uint32_t hibit(uint64_t n) {
 }
 
 uint64_t getIndex (uint64_t depth, uint64_t offset) {
-  return (offset << depth + 1) | ((1 << depth) - 1);
+  return (offset << (depth + 1)) | ((1 << depth) - 1);
 }
 
 // Needed for signing root keys
@@ -594,7 +595,7 @@ void next_root_index(const uint64_t max) {
   while (idx) {
     uint32_t factor = hibit(idx);
     //printf("idx: %llu\n", idx);
-    printf("offset; %lu, factor: %lu, %llu\n", offset, factor, offset + factor - 1);
+    printf("offset; %lu, factor: %u, %lu\n", offset, factor, offset + factor - 1);
     offset += 2 * factor;
     idx -= factor; //unset highest bit
   }
@@ -607,7 +608,7 @@ int root_indexes() {
   next_root_index(node_count);
   //101
 
-  printf("hibit: %lu\n", hibit(idx));
+  printf("hibit: %"PRIu32"\n", hibit(idx));
   //lowbit
   uint64_t offset = 0;
   int highbit = 4;
@@ -617,7 +618,7 @@ int root_indexes() {
     if (idx & (1 << i)) {
       //0xffffffffffffffff 
       //TODO: efficient offset: i-te bit und höher weg
-      printf("offset: %lu, factor: %d, %llu\n", offset, 1 << i, offset + (1 << i) - 1);
+      printf("offset: %lu, factor: %d, %lu\n", offset, 1 << i, offset + (1 << i) - 1);
       offset += 2 << i;
       //
     }
@@ -680,14 +681,14 @@ void rootHash(uint8_t hash[crypto_generichash_BYTES], struct file *tree) {
   uint64_t c = ((tree->size - 32) / TREE_ENTRY_SIZE) / 2; //number of child nodes
   uint64_t offset = 0;
 
-  printf("nodes: %llu\n", (tree->size - 32) / TREE_ENTRY_SIZE);
+  printf("nodes: %lu\n", (tree->size - 32) / TREE_ENTRY_SIZE);
 
   // iterate over root nodes
   while (c) {
     uint32_t factor = hibit(c);
     const size_t index = offset + factor - 1;
     const struct Node *root = &nodes[index];
-    printf("root index: %llu\n", index);
+    printf("root index: %lu\n", index);
 
     uint8_t type = 2; // root node
     //printHexDump(&type, 1);
@@ -767,8 +768,10 @@ int signRootHash(uint8_t hash[crypto_generichash_BYTES]) {
   if( crypto_sign_open(encrypted_hash, &mlen, sm, smlen, pk) != 0) {
     return 1;
   }
-printf("smlen: %d, mlen: %d\n", smlen, mlen);
+printf("smlen: %d, mlen: %d\n", (int) smlen, (int) mlen);
   printf("Verified!\n");
+
+  return 0;
 }
 
 int verify(const char signature_path[], const char tree_path[], const char pkey_path[]) {
@@ -806,7 +809,7 @@ printHexDump(signature, sizeof(signature));
   }
 
   if (encrypted_hash_len != 32) {
-    printf("unexpected enrypted hash len: %lu\n", encrypted_hash_len);
+    printf("unexpected enrypted hash len: %llu\n", encrypted_hash_len);
     return 1;
   }
 
@@ -971,7 +974,7 @@ return 0;
 
     printf("Path: %s\n", path);
 
-    hash_file(nodes, mapped, s.st_size, block_size);
+    hash_file(nodes, (uint8_t*) mapped, s.st_size, block_size);
 
     // Write nodes
     const uint64_t olenb = sizeof(struct Node) * nodes_count;
@@ -981,7 +984,7 @@ return 0;
       return 1;
     }
 
-    printf("nodes_count: %llu\n", nodes_count);
+    printf("nodes_count: %u\n", nodes_count);
     printNodes(nodes, nodes_count);
 
     munmap(mapped, s.st_size);

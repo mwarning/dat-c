@@ -275,7 +275,6 @@ void printHexDump(const void *addr, int len) {
 int openFile(struct file *file, const char path[]) {
   struct stat s = {0};
   char *mem = NULL;
-  int i;
 
   int fd = open (path, O_RDONLY);
   if (fd < 0) {

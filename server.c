@@ -37,7 +37,7 @@
 #include "dht_wrapper.h"
 
 
-#define DEBUGIO 1
+#define DEBUGIO 0
 
 
 #define ARRAY_SIZE(x)	(sizeof(x) / sizeof(x[0]))
@@ -47,7 +47,7 @@
 
 void createDiscoveryKey(uint8_t hash[32], const uint8_t pkey[32])
 {
-	crypto_generichash(hash, 32, "hypercore", 9, pkey, 32);
+	crypto_generichash(hash, 32, (uint8_t*) "hypercore", 9, pkey, 32);
 }
 
 enum MessageType {
@@ -219,11 +219,12 @@ static struct Session *addSession(const struct sockaddr_storage *addr, int clien
 	session->clientsock = clientsock;
 
 	// Setup out_state for crypto (int_state init requires in_nonce to be received)
-
+#if DEBUGIO
 	printf("crypto out pkey:\n");
 	printHexDump(&g_metadata.pkey[0], 32);
 	printf("crypto out nonce:\n");
 	printHexDump(&session->out_nonce[0], 32);
+#endif
 
 	crypto_stream_xor_init(&session->out_state, &session->out_nonce[0], &g_metadata.pkey[0]);
 
@@ -246,7 +247,7 @@ int send_msg(struct Session *session, int type, int channel, uint8_t data[], siz
 	size_t bodysize_len = uint32_size(bodysize);
 
 	if (offset < (header_len + bodysize_len)) {
-		printf("message offset too small (%d > %d + %d)\n", offset, header_len, bodysize_len);
+		printf("message offset too small (%ld > %ld + %ld)\n", offset, header_len, bodysize_len);
 		return EXIT_FAILURE;
 	}
 
@@ -303,7 +304,7 @@ int send_feed(struct Session *session)
 	// Send Feed
 	Feed feed = FEED__INIT;
 
-	feed.discoverykey.data = &g_metadata.discovery_key[0];
+	feed.discoverykey.data = &session->reg->discovery_key[0];
 	feed.discoverykey.len = 32;
 	feed.has_nonce = 1;
 	feed.nonce.data = &session->out_nonce[0];
@@ -426,7 +427,7 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 	// Enough data
 	if (msgsize > size) {
 		//printHexDump(src, size);
-		printf("More data needed!! (%llu)\n", msgsize);
+		printf("More data needed!! (%u)\n", msgsize);
 		return 0;
 	}
 
@@ -438,7 +439,7 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 
 	uint32_t header = varint_parse_uint32(src + msgsize_len, header_len);
 
-	int channel = header >> 4;
+	//int channel = header >> 4;
 	int type = header & 15;
 
 	const uint8_t *pb = src + msgsize_len + header_len;
@@ -475,6 +476,7 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 				session->reg = &g_content;
 		} else {
 			printf("Peer asked for unknown discoverykey\n");
+			printHexDump(feed->discoverykey.data, 32);
 			return -1;
 		}
 
@@ -556,8 +558,8 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 		}
 		printf("Received HAVE:\n");
 
-		printf(" start: %llu\n", have->start);
-		printf(" length: %llu\n", have->length);
+		printf(" start: %lu\n", have->start);
+		printf(" length: %lu\n", have->length);
 		if (have->has_bitfield) {
 			printHexDump(have->bitfield.data, have->bitfield.len);
 		}
@@ -574,9 +576,9 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 		}
 		printf("Received UNHAVE:\n");
 
-		printf(" start: %llu\n", unhave->start);
+		printf(" start: %lu\n", unhave->start);
 		if (unhave->has_length) {
-			printf(" length: %llu\n", unhave->length); //is default set?
+			printf(" length: %lu\n", unhave->length); //is default set?
 		}
 		unhave__free_unpacked(unhave, NULL);
 		break;
@@ -590,9 +592,9 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 		}
 		printf("Received WANT:\n");
 
-		printf(" start: %llu\n", want->start);
+		printf(" start: %lu\n", want->start);
 		if (want->has_length) {
-			printf(" length: %llu\n", want->length);
+			printf(" length: %lu\n", want->length);
 		}
 		want__free_unpacked(want, NULL);
 		break;
@@ -606,9 +608,9 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 		}
 		printf("Received UNWANT:\n");
 
-		printf(" start: %llu\n", unwant->start);
+		printf(" start: %lu\n", unwant->start);
 		if (unwant->has_length) {
-			printf(" length: %llu\n", unwant->length);
+			printf(" length: %lu\n", unwant->length);
 		}
 
 		unwant__free_unpacked(unwant, NULL);
@@ -623,15 +625,15 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 		}
 		printf("Received REQUEST:\n");
 
-		printf(" index: %llu\n", request->index);
+		printf(" index: %lu\n", request->index);
 		if (request->has_bytes) {
-			printf(" bytes: %llu\n", request->bytes);
+			printf(" bytes: %lu\n", request->bytes);
 		}
 		if (request->has_hash) {
 			printf(" hash: %d\n", request->hash);
 		}
 		if (request->has_nodes) {
-			printf(" nodes: %llu\n", request->nodes);
+			printf(" nodes: %lu\n", request->nodes);
 		}
 
 		request__free_unpacked(request, NULL);
@@ -646,9 +648,9 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 		}
 		printf("Received CANCEL:\n");
 
-		printf(" index: %llu\n", cancel->index);
+		printf(" index: %lu\n", cancel->index);
 		if (cancel->bytes) {
-			printf(" bytes: %llu\n", cancel->bytes);
+			printf(" bytes: %lu\n", cancel->bytes);
 		}
 		if (cancel->hash) {
 			printf(" hash: %d\n", cancel->hash);
@@ -666,16 +668,16 @@ int parse_message(struct Session *session, const uint8_t *src, size_t size)
 		}
 		printf("Received DATA:\n");
 
-		printf(" index: %llu\n", data->index);
+		printf(" index: %lu\n", data->index);
 		if (data->has_value) {
 			printHexDump(data->value.data, data->value.len);
 		}
 
 		for (i = 0; i < data->n_nodes; i++) {
 			Data__Node *node = data->nodes[i];
-			printf(" node: index: %llu\n", node->index);
+			printf(" node: index: %lu\n", node->index);
 			printHexDump(node->hash.data, node->hash.len);
-			printf(" node: size: %llu\n", node->size);
+			printf(" node: size: %lu\n", node->size);
 		}
 
 		if (data->has_signature) {
@@ -706,6 +708,7 @@ int handle_connection3(struct Session *session, uint8_t *data, size_t size)
 	}
 
 	if (session->in_nonce_received) {
+		printf("encrypt received\n");
 		//printf("crypto_stream_xor_update %llu, to_copy: %llu\n", session->buffer_len, to_copy);
 		int rc = crypto_stream_xor_update(&session->in_state, &session->buffer[session->buffer_len], data, size);
 		if (rc) return -1;
@@ -735,22 +738,26 @@ int handle_connection3(struct Session *session, uint8_t *data, size_t size)
 		session->buffer_len = newlen;
 
 		// Switch to encryption
-		if (0 == prev_in_nonce_received && session->in_nonce_received && newlen) {
+		if (0 == prev_in_nonce_received && session->in_nonce_received) {
+			uint8_t tmp[FIELD_SIZEOF(struct Session, buffer)];
+
+#if DEBUGIO
 			printf("switch to encrypt:\n");
 			printHexDump(&session->buffer[0], newlen);
 
-			uint8_t tmp[FIELD_SIZEOF(struct Session, buffer)];
 			printf("crypto in pkey:\n");
 			printHexDump(&session->reg->pkey[0], 32);
 			printf("crypto in nonce:\n");
 			printHexDump(&session->in_nonce[0], 32);
+#endif
 
 			crypto_stream_xor_init(&session->in_state, &session->in_nonce[0], &session->reg->pkey[0]);
 			crypto_stream_xor_update(&session->in_state, &tmp[0], &session->buffer[0], newlen);
 			memcpy(&session->buffer[0], tmp, newlen);
-
+#if DEBUGIO
 			printf("encrypted:\n");
 			printHexDump(&session->buffer[0], newlen);
+#endif
 		}
 	}
 
@@ -764,7 +771,6 @@ static void dat_client_handler(int revents, int clientsock);
 static int loadPKey(uint8_t pkey[32], const char pkey_path[])
 {
 	struct file pkey_file;
-	int rc;
 
 	if (0 != openFile(&pkey_file, pkey_path)) {
 		return EXIT_FAILURE;
@@ -795,6 +801,9 @@ static int initRegister(struct Register *reg, const char pkey_path[])
 	memcpy(&reg->pkey, pkey, sizeof(pkey));
 	createDiscoveryKey(&reg->discovery_key[0], pkey);
 	reg->pkey_path = strdup(pkey_path);
+
+	printf("discoverykey:\n");
+	printHexDump(&reg->discovery_key[0], 32);
 
 	return EXIT_SUCCESS;
 }
@@ -889,9 +898,9 @@ static void dat_client_handler(int revents, int clientsock)
 	if (!session->out_nonce_send) {
 		send_feed(session);
 		send_handshake(session);
-		//send_info(session);
-		//send_have(session);
-		//send_want(session);
+		send_info(session);
+		send_have(session);
+		send_want(session);
 	}
 
 	return;
@@ -1017,9 +1026,6 @@ static void cmd_exec(FILE* fp, const char cmd[])
 
 static void cmd_server_handler(int rc, int serversock)
 {
-	struct sockaddr_un addr;
-	socklen_t addrlen;
-	int clientsock;
 	char request[64];
 
 	if (rc <= 0) {
