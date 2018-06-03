@@ -1,7 +1,6 @@
 
 CC ?= gcc
-CFLAGS += -g -Wall -Werror -fno-strict-aliasing -Wwrite-strings -std=gnu99
-
+CFLAGS += -g -Wall -Werror -fno-strict-aliasing -Wwrite-strings -std=gnu99 -fsanitize=address -fsanitize=undefined
 
 all: metadata.pb-c.c schema.pb-c.c
 	$(CC) $(CFLAGS) main.c utils.c metadata.pb-c.c -lsodium -lprotobuf-c -o main
