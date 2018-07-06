@@ -12,5 +12,5 @@ Dependencies:
 - protobuf-c
 
 Working so far:
-- making an encrypted connection and send a few messages 
-- reading SLEEP files and node tree file content
+- make an encrypted connection and send a few inital messages 
+- read SLEEP files and verify node tree file content
